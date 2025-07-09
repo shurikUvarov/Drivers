@@ -9,7 +9,7 @@ class Kramer3000Driver extends BaseDriver {
     name: 'Kramer3000',
     manufacturer: 'Kramer',
     version: '1.0.0',
-    description: 'Драйвер для устройств Kramer, поддерживающих протокол 3000 (команда RESET)'
+    description: 'Драйвер для устройств Kramer, поддерживающих протокол 3000 (команда RESET) TCP порт 50000'
   };
 
   // Описание доступных команд
@@ -20,6 +20,19 @@ class Kramer3000Driver extends BaseDriver {
     },
     getButtonRGB: {
       description: 'Запрос цвета кнопки',
+      parameters: [
+        {
+          name: 'button',
+          type: 'number',
+          description: 'Номер кнопки (1-20)',
+          required: true,
+          min: 1,
+          max: 20
+        }
+      ]
+    },
+    setButton: {
+      description: 'Команда BTN для заданной кнопки',
       parameters: [
         {
           name: 'button',
@@ -96,6 +109,15 @@ class Kramer3000Driver extends BaseDriver {
   getButtonRGB(params) {
     const { button } = params;
     return { payload: `#RGB? ${button}\r` };
+  }
+
+  /**
+   * Отправка команды BTN (##BTN <button>,01,R\r)
+   * @param {{ button: number }} params
+   */
+  setButton(params) {
+    const { button } = params;
+    return { payload: `##BTN ${button},01,R\r` };
   }
 
   /**
