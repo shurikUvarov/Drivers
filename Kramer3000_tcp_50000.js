@@ -9,7 +9,7 @@ class Kramer3000Driver extends BaseDriver {
     name: 'Kramer3000',
     manufacturer: 'Kramer',
     version: '1.0.0',
-    description: 'Драйвер для устройств Kramer, поддерживающих протокол 3000 (команда RESET) TCP порт 50000'
+    description: 'Драйвер для устройств Kramer, поддерживающих протокол 3000 (команда RESET)'
   };
 
   // Описание доступных команд
@@ -41,6 +41,13 @@ class Kramer3000Driver extends BaseDriver {
           required: true,
           min: 1,
           max: 20
+        },
+        {
+          name: 'action',
+          type: 'string',
+          description: 'press | release | hold (по умолчанию press)',
+          required: false,
+          enum: ['press', 'release', 'hold']
         }
       ]
     }
@@ -116,8 +123,10 @@ class Kramer3000Driver extends BaseDriver {
    * @param {{ button: number }} params
    */
   setButton(params) {
-    const { button } = params;
-    return { payload: `##BTN ${button},01,R\r` };
+    const { button, action = 'press' } = params;
+    const actionMap = { press: 'P', release: 'R', hold: 'H' };
+    const code = actionMap[String(action).toLowerCase()] || 'P';
+    return { payload: `##BTN ${button},01,${code}\r` };
   }
 
   /**
