@@ -9,7 +9,7 @@ class LumienDriver extends BaseDriver {
     name: 'Lumien',
     manufacturer: 'Lumien',
     version: '1.0.0',
-    description: 'Драйвер для устройства Lumien (поддержка Power и Mute)'
+    description: 'Драйвер для устройства Lumien (поддержка Power и Mute) TCP порт 4660' 
   };
 
   // Список команд
