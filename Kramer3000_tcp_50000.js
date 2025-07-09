@@ -159,8 +159,10 @@ class Kramer3000Driver extends BaseDriver {
   }
 
   initialize() {
-    if (this.debug) {
-      console.log('Kramer3000Driver инициализирован');
+        // Опрос первых 8 кнопок при запуске
+    for (let i = 1; i <= 8; i++) {
+      // Используем publishCommand, чтобы система сформировала правильный пакет
+      this.publishCommand('getButtonRGB', { button: i });
     }
   }
 }
