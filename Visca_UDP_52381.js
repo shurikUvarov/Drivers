@@ -5,149 +5,147 @@ const BaseDriver = require('base-driver');
  */
 class ViscaDriver extends BaseDriver {
 
-  // Метаданные
+  /* ── МЕТАДАННЫЕ ───────────────────────────────────────── */
   static metadata = {
-    name: 'ViscaCamera',
+    name        : 'ViscaCamera',
     manufacturer: 'Generic',
-    version: '1.0.1',
-    description: 'PTZ камера по протоколу VISCA (Serial/RS232)'
+    version     : '1.0.2',
+    description : 'PTZ камера по протоколу VISCA (Serial/RS232)',
   };
 
-  // Команды
+  /* ── КОМАНДЫ ─────────────────────────────────────────── */
   static commands = {
     power: {
       description: 'Включить/выключить питание',
-      parameters: [
-        { name: 'state', type: 'string', required: true, enum: ['On', 'Off'] }
-      ]
+      parameters : [{ name: 'state', type: 'string', required: true, enum: ['On', 'Off'] }],
     },
     panTilt: {
-      description: 'Управление поворотом/наклоном',
-      parameters: [
+      description: 'Поворот/наклон камеры',
+      parameters : [
         { name: 'direction', type: 'string', required: true, enum: ['Up','Down','Left','Right','Up Left','Up Right','Down Left','Down Right','Stop'] },
-        { name: 'panSpeed', type: 'number', required: true, min: 1, max: 24 },
-        { name: 'tiltSpeed', type: 'number', required: true, min: 1, max: 24 }
-      ]
+        { name: 'panSpeed',  type: 'number', required: true, min: 1, max: 24 },
+        { name: 'tiltSpeed', type: 'number', required: true, min: 1, max: 24 },
+      ],
     },
     zoom: {
       description: 'Зум камеры',
-      parameters: [
+      parameters : [
         { name: 'direction', type: 'string', required: true, enum: ['Tele','Wide','Stop'] },
-        { name: 'speed', type: 'number', required: true, min: 0, max: 7 }
-      ]
+        { name: 'speed',     type: 'number', required: true, min: 0, max: 7 },
+      ],
     },
     focus: {
       description: 'Фокусировка',
-      parameters: [
+      parameters : [
         { name: 'direction', type: 'string', required: true, enum: ['Near','Far','Stop'] },
-        { name: 'speed', type: 'number', required: true, min: 0, max: 7 }
-      ]
+        { name: 'speed',     type: 'number', required: true, min: 0, max: 7 },
+      ],
     },
     autoFocus: {
-      description: 'Включение/выключение автофокуса',
-      parameters: [
-        { name: 'mode', type: 'string', required: true, enum: ['Auto','Manual'] }
-      ]
+      description: 'Автофокус',
+      parameters : [{ name: 'mode', type: 'string', required: true, enum: ['Auto','Manual'] }],
     },
     recallPreset: {
-      description: 'Вызов пресета',
-      parameters: [{ name: 'preset', type: 'number', required: true, min: 1, max: 16 }]
+      description: 'Вызвать пресет',
+      parameters : [{ name: 'preset', type: 'number', required: true, min: 1, max: 16 }],
     },
     savePreset: {
-      description: 'Сохранение пресета',
-      parameters: [{ name: 'preset', type: 'number', required: true, min: 1, max: 16 }]
+      description: 'Сохранить пресет',
+      parameters : [{ name: 'preset', type: 'number', required: true, min: 1, max: 16 }],
     },
     autoExposure: {
       description: 'Режим автоэкспозиции',
-      parameters: [
-        { name: 'mode', type: 'string', required: true, enum: ['Automatic Exposure Mode','Manual Control Mode','Shutter Priority Mode','Iris Priority Mode','Bright Mode'] }
-      ]
+      parameters : [
+        { name: 'mode', type: 'string', required: true,
+          enum: ['Automatic Exposure Mode','Manual Control Mode','Shutter Priority Mode','Iris Priority Mode','Bright Mode'] },
+      ],
     },
     backlightMode: {
       description: 'Компенсация задней подсветки',
-      parameters: [
-        { name: 'state', type: 'string', required: true, enum: ['On','Off'] }
-      ]
+      parameters : [{ name: 'state', type: 'string', required: true, enum: ['On','Off'] }],
     },
     setDeviceId: {
-      description: 'Установка ID устройства',
-      parameters: [{ name: 'id', type: 'number', required: true, min: 1, max: 7 }]
-    }
+      description: 'Установить ID камеры',
+      parameters : [{ name: 'id', type: 'number', required: true, min: 1, max: 7 }],
+    },
   };
 
-  // Ответы
+  /* ── ОТВЕТЫ ──────────────────────────────────────────── */
   static responses = {
-    powerStatus: {
-      description: 'Состояние питания',
+    Power: {
+      description:'Состояние питания',
       matcher: { pattern: /81 90 40 (02|03)/ },
-      extract: m => ({ type:'Power', state: m[1] === '02' ? 'On' : 'Off' })
+      extract: m => ({ state: m[1] === '02' ? 'On' : 'Off' }),
+      category:'Power', recommendedOutput:true,
     },
-    autoFocusStatus: {
-      description: 'Режим автофокуса',
+    AutoFocus: {
+      description:'Режим автофокуса',
       matcher: { pattern: /81 90 40 38 (02|03)/ },
-      extract: m => ({ type:'AutoFocus', mode: m[1] === '02' ? 'Auto' : 'Manual' })
+      extract: m => ({ mode: m[1] === '02' ? 'Auto' : 'Manual' }),
+      category:'Focus', recommendedOutput:true,
     },
-    exposureStatus: {
-      description: 'Режим экспозиции',
+    AutoExposure: {
+      description:'Режим автоэкспозиции',
       matcher: { pattern: /81 90 40 39 ([0-9A-F]{2})/ },
       extract: m => {
         const map = { '00':'Automatic Exposure Mode','03':'Manual Control Mode','0A':'Shutter Priority Mode','0B':'Iris Priority Mode','0D':'Bright Mode' };
-        return { type:'AutoExposure', mode: map[m[1]] || 'Unknown' };
-      }
+        return { mode: map[m[1]] || 'Unknown' };
+      },
+      category:'Exposure', recommendedOutput:true,
     },
-    backlightStatus: {
-      description: 'Режим задней подсветки',
+    BacklightMode: {
+      description:'Режим задней подсветки',
       matcher: { pattern: /81 90 40 33 (02|03)/ },
-      extract: m => ({ type:'BacklightMode', state: m[1] === '02' ? 'On' : 'Off' })
+      extract: m => ({ state: m[1] === '02' ? 'On' : 'Off' }),
+      category:'Image', recommendedOutput:true,
     },
-    error: {
-      description: 'Ошибка устройства',
+    Error: {
+      description:'Ошибка камеры',
       matcher: { pattern: /81 90 60 ([0-9A-F]{2})/ },
       extract: m => {
         const errs = { '02':'Syntax Error','03':'Command Buffer Full','04':'Command Cancelled','05':'No Socket','41':'Command Not Executable' };
-        return { type:'Error', code: m[1], message: errs[m[1]] || 'Unknown Error' };
-      }
-    }
+        return { code: m[1], message: errs[m[1]] || 'Unknown Error' };
+      },
+      category:'Errors', recommendedOutput:true,
+    },
   };
 
-  // Конструктор
+  /* ── КОНСТРУКТОР ─────────────────────────────────────── */
   constructor(transport, config = {}, node) {
     super(transport, config, node);
     this.deviceId = config.deviceId || 1;
   }
 
   initialize() {
-    console.log('Инициализация VISCA камеры');
+    this.log('info','VISCA камера инициализирована');
   }
 
-  // Методы команд
+  /* ── КОМАНДЫ ─────────────────────────────────────────── */
   power({ state }) {
-    const cmd = Buffer.from([this._dev(), 0x01,0x04,0x00, state === 'On' ? 0x02 : 0x03, 0xFF]);
-    return { payload: cmd };
+    return { payload: Buffer.from([this._dev(),0x01,0x04,0x00,state==='On'?0x02:0x03,0xFF]) };
   }
 
   panTilt({ direction, panSpeed, tiltSpeed }) {
-    const map = { 'Up':[0x03,0x01], 'Down':[0x03,0x02], 'Left':[0x01,0x03], 'Right':[0x02,0x03],
-      'Up Left':[0x01,0x01], 'Up Right':[0x02,0x01], 'Down Left':[0x01,0x02], 'Down Right':[0x02,0x02], 'Stop':[0x03,0x03]};
+    const map = { 'Up':[0x03,0x01],'Down':[0x03,0x02],'Left':[0x01,0x03],'Right':[0x02,0x03],
+      'Up Left':[0x01,0x01],'Up Right':[0x02,0x01],'Down Left':[0x01,0x02],'Down Right':[0x02,0x02],'Stop':[0x03,0x03]};
     const [pan, tilt] = map[direction];
     return { payload: Buffer.from([this._dev(),0x01,0x06,0x01,panSpeed,tiltSpeed,pan,tilt,0xFF]) };
   }
 
   zoom({ direction, speed }) {
-    const map = { 'Tele':0x20, 'Wide':0x30, 'Stop':0x00 };
-    let val = direction === 'Stop' ? 0x00 : speed + map[direction];
+    const map = { 'Tele':0x20,'Wide':0x30,'Stop':0x00 };
+    const val = direction==='Stop'?0x00:speed+map[direction];
     return { payload: Buffer.from([this._dev(),0x01,0x04,0x07,val,0xFF]) };
   }
 
   focus({ direction, speed }) {
-    const map = { 'Far':0x20, 'Near':0x30, 'Stop':0x00 };
-    let val = direction === 'Stop' ? 0x00 : speed + map[direction];
+    const map = { 'Far':0x20,'Near':0x30,'Stop':0x00 };
+    const val = direction==='Stop'?0x00:speed+map[direction];
     return { payload: Buffer.from([this._dev(),0x01,0x04,0x08,val,0xFF]) };
   }
 
   autoFocus({ mode }) {
-    const val = mode === 'Auto' ? 0x02 : 0x03;
-    return { payload: Buffer.from([this._dev(),0x01,0x04,0x38,val,0xFF]) };
+    return { payload: Buffer.from([this._dev(),0x01,0x04,0x38,mode==='Auto'?0x02:0x03,0xFF]) };
   }
 
   recallPreset({ preset }) {
@@ -164,7 +162,7 @@ class ViscaDriver extends BaseDriver {
   }
 
   backlightMode({ state }) {
-    return { payload: Buffer.from([this._dev(),0x01,0x04,0x33,state === 'On' ? 0x02 : 0x03,0xFF]) };
+    return { payload: Buffer.from([this._dev(),0x01,0x04,0x33,state==='On'?0x02:0x03,0xFF]) };
   }
 
   setDeviceId({ id }) {
@@ -172,17 +170,7 @@ class ViscaDriver extends BaseDriver {
     return { payload: null };
   }
 
-  // Парсер
-  parseResponse(data) {
-    const hex = data.toString('hex').match(/.{1,2}/g).map(b => b.toUpperCase()).join(' ');
-    for (const [key, resp] of Object.entries(ViscaDriver.responses)) {
-      const regex = new RegExp(resp.matcher.pattern);
-      const m = hex.match(regex);
-      if (m) return resp.extract(m);
-    }
-    return null;
-  }
-
+  /* ── ВСПОМОГАТЕЛЬНОЕ ────────────────────────────────── */
   _dev() { return 0x80 + this.deviceId; }
 }
 
