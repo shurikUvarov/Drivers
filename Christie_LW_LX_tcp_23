@@ -1,0 +1,283 @@
+const BaseDriver = require('base-driver');
+
+/**
+ * Драйвер для проектора Christie LW/LX Series
+ */
+class ChristieProjectorDriver extends BaseDriver {
+  // Метаданные драйвера
+  static metadata = {
+    name: 'Christie LW/LX Series',
+    manufacturer: 'Christie',
+    version: '1.0.0',
+    description: 'Драйвер для проекторов Christie LW/LX Series'
+  };
+  
+  // Определение команд
+  static commands = {
+    setPower: {
+      description: 'Включение/выключение проектора',
+      parameters: [
+        {
+          name: 'value',
+          type: 'boolean',
+          description: 'Состояние питания (true=включено, false=выключено)',
+          required: true
+        }
+      ]
+    },
+    setInput: {
+      description: 'Выбор входного источника',
+      parameters: [
+        {
+          name: 'source',
+          type: 'string',
+          description: 'Имя источника',
+          required: true,
+          enum: ['Computer 1', 'Computer 2', 'HDMI', 'DVI-D', 'Component', 'S-Video', 'Video 1', 'Video 2', 'BNC']
+        }
+      ]
+    },
+    getPower: {
+      description: 'Запрос состояния питания',
+      parameters: []
+    },
+    getInput: {
+      description: 'Запрос текущего источника',
+      parameters: []
+    },
+    getLampUsage: {
+      description: 'Запрос часов наработки лампы',
+      parameters: []
+    },
+    getDeviceStatus: {
+      description: 'Запрос статуса устройства',
+      parameters: []
+    }
+  };
+  
+  // Определение типов ответов для системы
+  static responses = {
+    power: {
+      description: 'Статус питания',
+      fields: ['power']
+    },
+    input: {
+      description: 'Статус входного источника', 
+      fields: ['input']
+    },
+    lampUsage: {
+      description: 'Часы наработки лампы',
+      fields: ['hours']
+    },
+    deviceStatus: {
+      description: 'Статус устройства',
+      fields: ['status']
+    },
+    error: {
+      description: 'Ошибка устройства',
+      fields: ['message']
+    }
+  };
+
+    
+  // Инициализация при подключении
+  initialize() {
+    // Запрос начального статуса при подключении
+    this.publishCommand('getPower');
+    this.publishCommand('getInput');
+    this.publishCommand('getLampUsage');
+    this.publishCommand('getDeviceStatus');
+  }
+  KeepAlive(){
+    this.publishCommand('getPower');
+    this.publishCommand('getInput');
+    this.publishCommand('getLampUsage');
+    this.publishCommand('getDeviceStatus');
+  }
+  
+  // Методы команд
+  setPower(params) {
+    const { value } = params;
+    // Команды согласно официальной документации Christie
+    const powerCommands = {
+      true: Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0xBA, 0xD2, 0x01, 0x00, 0x00, 0x60, 0x01, 0x00]),  // ON
+      false: Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0x2A, 0xD3, 0x01, 0x00, 0x00, 0x60, 0x00, 0x00])   // OFF
+    };
+    return { payload: powerCommands[value] };
+  }
+  
+  setInput(params) {
+    const { source } = params;
+    this.state.input = source;
+    
+    // Команды согласно официальной документации Christie
+    const inputCommands = {
+      'Computer 1': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0xFE, 0xD2, 0x01, 0x00, 0x00, 0x20, 0x00, 0x00]),
+      'Computer 2': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0x3E, 0xD0, 0x01, 0x00, 0x00, 0x20, 0x04, 0x00]),
+      'HDMI': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0x0E, 0xD2, 0x01, 0x00, 0x00, 0x20, 0x03, 0x00]),
+      'DVI-D': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0xAE, 0xD4, 0x01, 0x00, 0x00, 0x20, 0x09, 0x00]),
+      'Component': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0xAE, 0xD1, 0x01, 0x00, 0x00, 0x20, 0x05, 0x00]),
+      'S-Video': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0x9E, 0xD3, 0x01, 0x00, 0x00, 0x20, 0x02, 0x00]),
+      'Video 1': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0x6E, 0xD3, 0x01, 0x00, 0x00, 0x20, 0x01, 0x00]),
+      'Video 2': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0x5E, 0xD4, 0x01, 0x00, 0x00, 0x20, 0x0A, 0x00]),
+      'BNC': Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0xCE, 0xD0, 0x01, 0x00, 0x00, 0x20, 0x07, 0x00])
+    };
+    
+    return { payload: inputCommands[source] };
+  }
+  
+  getPower() {
+    // Команда запроса статуса питания
+    return { payload: Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0x19, 0xD3, 0x02, 0x00, 0x00, 0x60, 0x00, 0x00]) };
+  }
+  
+  getInput() {
+    // Команда запроса текущего источника
+    return { payload: Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0xCD, 0xD2, 0x02, 0x00, 0x00, 0x20, 0x00, 0x00]) };
+  }
+  
+  getLampUsage() {
+    
+    // Команда запроса часов наработки лампы (LAMP TIME LOW)
+    return { payload: Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0xC2, 0xFF, 0x02, 0x00, 0x90, 0x10, 0x00, 0x00]) };
+  }
+  
+  getDeviceStatus() {
+    // Команда запроса статуса ошибок устройства
+    return { payload: Buffer.from([0xBE, 0xEF, 0x03, 0x06, 0x00, 0xD9, 0xD8, 0x02, 0x00, 0x20, 0x60, 0x00, 0x00]) };
+  }
+  
+  // Обработка бинарных ответов
+    parseResponse(data) {
+    try {
+      let buffer;
+      
+      // Преобразуем данные в Buffer для работы с бинарными данными
+      if (Buffer.isBuffer(data.data)) {
+        buffer = data.data;
+      } else if (typeof data.data === 'string') {
+        buffer = Buffer.from(data.data, 'binary');
+      } else {
+        return null;
+      }
+      
+      // Проверяем ошибки протокола - для TCP #23 они приходят как первый байт
+      if (buffer.length > 0) {
+        const errorByte = buffer[0];
+        if (errorByte === 0x15 || errorByte === 0x1C || errorByte === 0x1F) {
+          let errorType;
+          switch(errorByte) {
+            case 0x15: errorType = 'NAK Reply'; break;
+            case 0x1C: errorType = 'Error Reply'; break;
+            case 0x1F: errorType = 'Authentication Error Reply'; break;
+            default: errorType = 'Unknown Error';
+          }
+          return {
+            type: 'error',
+            message: errorType
+          };
+        }
+        
+        // Проверяем ACK ответ 
+        if (errorByte === 0x06) {
+          return {
+            type: 'ack',
+            message: 'Command acknowledged'
+          };
+        }
+      }
+      
+      // Для TCP #23 ответ имеет формат: 1DH + 2 байта данных
+      if (buffer.length === 3 && buffer[0] === 0x1D) {
+        const dataLow = buffer[1];
+        const dataHigh = buffer[2];
+        const data16 = (dataHigh << 8) | dataLow;
+        
+        // Определяем тип данных по контексту последней команды
+        // Пока возвращаем универсальный ответ
+        if (dataLow === 0x00 || dataLow === 0x01 || dataLow === 0x02) {
+          // Вероятно статус питания
+          let power;
+          switch(dataLow) {
+            case 0x01: power = 'On'; break;
+            case 0x00: power = 'Off'; break;
+            case 0x02: power = 'Cooling Down'; break;
+            default: power = 'Unknown';
+          }
+          return {
+            type: 'power',
+            power: power
+          };
+        }
+        
+        // Источники (0x00-0x0A)
+        if (dataLow >= 0x00 && dataLow <= 0x0A && dataHigh === 0x00) {
+          const inputMap = {
+            0x00: 'Computer 1',
+            0x04: 'Computer 2',
+            0x03: 'HDMI',
+            0x09: 'DVI-D',
+            0x05: 'Component',
+            0x02: 'S-Video',
+            0x01: 'Video 1',
+            0x0A: 'Video 2',
+            0x07: 'BNC'
+          };
+          return {
+            type: 'input',
+            input: inputMap[dataLow] || 'Unknown'
+          };
+        }
+        
+        // Часы лампы (обычно большие значения)
+        if (data16 > 10) {
+          return {
+            type: 'lampUsage',
+            hours: data16
+          };
+        }
+        
+        // Статус устройства (Error Status)
+        // Для TCP #23 может быть сокращенный формат
+        if (dataLow <= 0x10 && dataHigh === 0x00) {
+          const statusMap = {
+            0x00: 'Normal',
+            0x01: 'Cover Error',
+            0x02: 'Fan Error',
+            0x03: 'Lamp Error',
+            0x04: 'Temperature Error',
+            0x05: 'Air Flow Error',
+            0x07: 'Cold Error',
+            0x08: 'Filter Error',
+            0x0F: 'Shutter Error',
+            0x10: 'Lens Shift Error'
+          };
+          return {
+            type: 'deviceStatus',
+            status: statusMap[dataLow] || 'Unknown Error'
+          };
+        }
+        
+        // Неизвестный тип данных
+        return {
+          type: 'data',
+          value: data16,
+          raw: buffer.toString('hex')
+        };
+      }
+      
+      // Если ответ не распознан, возвращаем null
+      return null;
+      
+    } catch (error) {
+      console.error('Ошибка при обработке ответа:', error);
+      return {
+        type: 'error',
+        message: error.message,
+        raw: data
+      };
+    }
+  }
+}
+
+module.exports = ChristieProjectorDriver; 
