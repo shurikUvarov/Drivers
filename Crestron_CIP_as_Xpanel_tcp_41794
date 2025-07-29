@@ -1,0 +1,587 @@
+const BaseDriver = require('base-driver');
+
+/**
+ * Драйвер для Crestron CIP (Crestron Integrated Protocol)
+ */
+class CrestronCIPDriver extends BaseDriver {
+  // Метаданные драйвера
+  static metadata = {
+    name: 'Crestron CIP Client',
+    manufacturer: 'Crestron',
+    version: '1.0.0',
+    description: 'Драйвер для связи с контроллерами Crestron через CIP протокол'
+  };
+  
+  // Определение команд
+  static commands = {
+    setDigital: {
+      description: 'Установить цифровой сигнал',
+      parameters: [
+        {
+          name: 'join',
+          type: 'number',
+          description: 'Номер джойна (1-65535)',
+          required: true,
+          min: 1,
+          max: 65535
+        },
+        {
+          name: 'value',
+          type: 'boolean',
+          description: 'Значение сигнала (true/false)',
+          required: true
+        }
+      ]
+    },
+    setAnalog: {
+      description: 'Установить аналоговый сигнал',
+      parameters: [
+        {
+          name: 'join',
+          type: 'number',
+          description: 'Номер джойна (1-65535)',
+          required: true,
+          min: 1,
+          max: 65535
+        },
+        {
+          name: 'value',
+          type: 'number',
+          description: 'Значение сигнала (0-65535)',
+          required: true,
+          min: 0,
+          max: 65535
+        }
+      ]
+    },
+    setSerial: {
+      description: 'Установить строковый сигнал',
+      parameters: [
+        {
+          name: 'join',
+          type: 'number',
+          description: 'Номер джойна (1-65535)',
+          required: true,
+          min: 1,
+          max: 65535
+        },
+        {
+          name: 'value',
+          type: 'string',
+          description: 'Строковое значение',
+          required: true
+        }
+      ]
+    },
+    pressButton: {
+      description: 'Нажать кнопку (цифровой сигнал с автоотпусканием)',
+      parameters: [
+        {
+          name: 'join',
+          type: 'number',
+          description: 'Номер джойна кнопки (1-65535)',
+          required: true,
+          min: 1,
+          max: 65535
+        }
+      ]
+    },
+    pulseButton: {
+      description: 'Импульс кнопки (нажать и отпустить)',
+      parameters: [
+        {
+          name: 'join',
+          type: 'number',
+          description: 'Номер джойна кнопки (1-65535)',
+          required: true,
+          min: 1,
+          max: 65535
+        }
+      ]
+    },
+    requestUpdate: {
+      description: 'Запросить обновление всех сигналов'
+    },
+    processRegistrationF: {
+      description: 'Регистрация'
+    }
+    
+  };
+  
+  // Определение типов ответов для системы
+  static responses = {
+    digital: {
+      description: 'Цифровой сигнал',
+      fields: ['join', 'value']
+    },
+    analog: {
+      description: 'Аналоговый сигнал',
+      fields: ['join', 'value']
+    },
+    serial: {
+      description: 'Строковый сигнал',
+      fields: ['join', 'value']
+    },
+    registration: {
+      description: 'Результат регистрации',
+      fields: ['success', 'ipid']
+    },
+    error: {
+      description: 'Ошибка CIP',
+      fields: ['message']
+    }
+  };
+
+  constructor() {
+    super();
+    
+    // CIP пакеты
+    this.cipPackets = {
+      d: Buffer.from([0x05, 0x00, 0x06, 0x00, 0x00, 0x03, 0x00]),
+      db: Buffer.from([0x05, 0x00, 0x06, 0x00, 0x00, 0x03, 0x27]),
+      a: Buffer.from([0x05, 0x00, 0x08, 0x00, 0x00, 0x05, 0x14]),
+      s: Buffer.from([0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x34])
+    };
+    
+    // Состояние
+    this.connected = false;
+    this.registered = false;
+    this.ipid = 0x18; // IPID по умолчанию 18 (0x12)
+    
+    // Хранение джойнов
+    this.joins = {
+      in: { d: {}, a: {}, s: {} },
+      out: { d: {}, a: {}, s: {} }
+    };
+  }
+  
+  // Инициализация при подключении
+  initialize() {
+    this.ipid = this.options?.ipid || 0x18; // IPID по умолчанию 18
+    this.debug = this.options?.debug || false;
+    
+    if (this.debug) {
+      console.log(`Инициализация CIP с IPID: 0x${this.ipid.toString(16)}`);
+      console.log('Ожидание Registration Request от контроллера Crestron...');
+    }
+    
+    // НЕ отправляем ничего сразу - ждем Registration Request от контроллера
+  }
+  
+  // НЕ отправляем ничего сразу - ждем Registration Request от контроллера
+  
+  // Установка цифрового сигнала
+  setDigital(params) {
+    const { join, value } = params;
+    this.joins.out.d[join] = value ? 1 : 0;
+    
+    const packet = Buffer.from(this.cipPackets.d);
+    const cipJoin = join - 1;
+    let packedJoin = Math.floor(cipJoin / 256) + ((cipJoin % 256) * 256);
+    
+    if (!value) {
+      packedJoin |= 0x80;
+    }
+    
+    const joinBytes = Buffer.allocUnsafe(2);
+    joinBytes.writeUInt16BE(packedJoin, 0);
+    
+    const result = Buffer.concat([packet, joinBytes]);
+    
+    if (this.debug) {
+      console.log(`Цифровой джойн ${join} установлен в ${value ? 'ON' : 'OFF'}`);
+    }
+    
+    return { payload: result };
+  }
+  
+  // Установка аналогового сигнала
+  setAnalog(params) {
+    const { join, value } = params;
+    this.joins.out.a[join] = value;
+    
+    const packet = Buffer.from(this.cipPackets.a);
+    const cipJoin = join - 1;
+    
+    const joinBytes = Buffer.allocUnsafe(2);
+    joinBytes.writeUInt16BE(cipJoin, 0);
+    
+    const valueBytes = Buffer.allocUnsafe(2);
+    valueBytes.writeUInt16BE(value, 0);
+    
+    const result = Buffer.concat([packet, joinBytes, valueBytes]);
+    
+    if (this.debug) {
+      console.log(`Аналоговый джойн ${join} установлен в ${value}`);
+    }
+    
+    return { payload: result };
+  }
+  
+  // Установка строкового сигнала
+  setSerial(params) {
+    const { join, value } = params;
+    this.joins.out.s[join] = value;
+    
+    const packet = Buffer.from(this.cipPackets.s);
+    packet[2] = 8 + value.length;
+    packet[6] = 4 + value.length;
+    
+    const cipJoin = join - 1;
+    const joinBytes = Buffer.allocUnsafe(2);
+    joinBytes.writeUInt16BE(cipJoin, 0);
+    
+    const valueBytes = Buffer.from(value, 'ascii');
+    const separator = Buffer.from([0x03]);
+    
+    const result = Buffer.concat([packet, joinBytes, separator, valueBytes]);
+    
+    if (this.debug) {
+      console.log(`Строковый джойн ${join} установлен в "${value}"`);
+    }
+    
+    return { payload: result };
+  }
+  
+  // Нажатие кнопки
+  pressButton(params) {
+    const { join } = params;
+    this.joins.out.d[join] = 1;
+    
+    const packet = Buffer.from(this.cipPackets.db);
+    const cipJoin = join - 1;
+    const packedJoin = Math.floor(cipJoin / 256) + ((cipJoin % 256) * 256);
+    
+    const joinBytes = Buffer.allocUnsafe(2);
+    joinBytes.writeUInt16BE(packedJoin, 0);
+    
+    const result = Buffer.concat([packet, joinBytes]);
+    
+    if (this.debug) {
+      console.log(`Кнопка ${join} нажата`);
+    }
+    
+    return { payload: result };
+  }
+  
+  // Импульс кнопки
+  pulseButton(params) {
+    const { join } = params;
+    
+    // Нажимаем через publishCommand
+    this.publishCommand('pressButton', { join });
+    
+    // Отпускаем через 100мс
+    setTimeout(() => {
+      this.joins.out.d[join] = 0;
+      const packet = Buffer.from(this.cipPackets.db);
+      const cipJoin = join - 1;
+      let packedJoin = Math.floor(cipJoin / 256) + ((cipJoin % 256) * 256);
+      packedJoin |= 0x80; // Добавляем флаг отпускания
+      
+      const joinBytes = Buffer.allocUnsafe(2);
+      joinBytes.writeUInt16BE(packedJoin, 0);
+      
+      const releasePacket = Buffer.concat([packet, joinBytes]);
+      
+      // Отправляем напрямую через транспорт
+      if (this.transport && this.transport.send) {
+        this.transport.send(releasePacket);
+      }
+      
+      if (this.debug) {
+        console.log(`Кнопка ${join} отпущена`);
+      }
+    }, 100);
+    
+    return {
+      type: 'button_pulse',
+      join: join
+    };
+  }
+  
+  // Запрос обновления
+  requestUpdate() {
+    const packet = Buffer.from([0x05, 0x00, 0x05, 0x00, 0x00, 0x02, 0x03, 0x00]);
+    
+    if (this.debug) {
+      console.log('Запрос обновления отправлен');
+    }
+    
+    return { payload: packet };
+  }
+  
+  // Обработка входящих пакетов
+  parseResponse(data) {
+    try {
+      let buffer;
+      
+      if (Buffer.isBuffer(data.data)) {
+        buffer = data.data;
+      } else if (typeof data.data === 'string') {
+        buffer = Buffer.from(data.data, 'binary');
+      } else {
+        return null;
+      }
+      
+      if (this.debug) {
+        console.log('RX:', buffer.toString('hex'));
+      }
+      
+      // Обрабатываем пакеты по очереди
+      let position = 0;
+      
+      while (position < buffer.length) {
+        if ((buffer.length - position) < 4) {
+          if (this.debug) {
+            console.log(`Пакет слишком короткий: ${buffer.length - position} байт`);
+          }
+          break;
+        }
+        
+        const payloadLength = (buffer[position + 1] << 8) + buffer[position + 2];
+        const packetLength = payloadLength + 3;
+        
+        if ((buffer.length - position) < packetLength) {
+          if (this.debug) {
+            console.log(`Неполный пакет: нужно ${packetLength}, есть ${buffer.length - position}`);
+          }
+          break;
+        }
+        
+        const packetType = buffer[position];
+        const payload = buffer.slice(position + 3, position + 3 + payloadLength);
+        
+        if (this.debug) {
+          console.log(`Обработка пакета: тип=0x${packetType.toString(16)}, длина_полезной_нагрузки=${payloadLength}, полезная_нагрузка=${payload.toString('hex')}`);
+        }
+        
+        const result = this.processPayload(packetType, payload);
+        if (result) {
+          return result;
+        }
+        
+        position += packetLength;
+      }
+      
+      return {};
+      
+    } catch (error) {
+      console.error('Ошибка при обработке CIP пакета:', error);
+      return {
+        type: 'error',
+        message: error.message
+      };
+    }
+  }
+  processRegistrationF(){
+      const registration = Buffer.from([
+          0x01, 0x00, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00,
+          this.ipid,
+          0x40, 0xFF, 0xFF, 0xF1, 0x01
+        ]);
+      return { payload: registration };
+  }
+  // Обработка полезной нагрузки
+  processPayload(cipType, payload) {
+    switch (cipType) {
+      case 0x0D:
+        // Heartbeat от контроллера
+        if (this.debug) {
+          console.log('Получен Heartbeat от контроллера');
+        }
+        const heartbeatResponse = Buffer.from([0x0D, 0x00, 0x02, 0x00, 0x00]);
+        
+        // Отправляем heartbeat response напрямую через транспорт
+        if (this.transport && this.transport.send) {
+          this.transport.send(heartbeatResponse);
+        }
+        
+        return {
+          type: 'heartbeat',
+          timestamp: Date.now()
+        };
+        
+      case 0x0E:
+        // Heartbeat response
+        return {};
+        
+      case 0x05:
+        // Данные
+        return this.processDataPacket(payload);
+        
+      case 0x12:
+        // Строковые данные
+        return this.processSerialPacket(payload);
+        
+      case 0x0F:
+        // Запрос регистрации от контроллера
+        if (this.debug) {
+          console.log('Получен Registration Request от контроллера');
+          console.log('Полезная нагрузка:', payload.toString('hex'));
+        }
+        
+        const registration = Buffer.from([
+          0x01, 0x00, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00,
+          this.ipid,
+          0x40, 0xFF, 0xFF, 0xF1, 0x01
+        ]);
+        
+        if (this.debug) {
+          console.log('Отправка регистрации:', registration.toString('hex'));
+        }
+        
+        // Отправляем registration response напрямую через транспорт
+        this.publishCommand('processRegistrationF');
+        console.log("publishCommand")
+        
+        return {
+          type: 'registration_request',
+          timestamp: Date.now()
+        };
+        
+      case 0x02:
+        // Результат регистрации
+        return this.processRegistrationResult(payload);
+        
+      case 0x03:
+        // Отключение
+        this.connected = false;
+        this.registered = false;
+        return { type: 'error', message: 'Control system disconnect' };
+        
+      default:
+        return {};
+    }
+  }
+  
+  // Обработка пакета данных
+  processDataPacket(payload) {
+    if (payload.length < 4) return null;
+    
+    const dataType = payload[3];
+    
+    switch (dataType) {
+      case 0x00:
+        // Цифровой сигнал
+        if (payload.length >= 6) {
+          const join = (((payload[5] & 0x7F) << 8) | payload[4]) + 1;
+          const state = ((payload[5] & 0x80) >> 7) ^ 0x01;
+          
+          this.joins.in.d[join] = state;
+          
+          return {
+            type: 'digital',
+            join: join,
+            value: state
+          };
+        }
+        break;
+        
+      case 0x14:
+        // Аналоговый сигнал
+        if (payload.length >= 8) {
+          const join = ((payload[4] << 8) | payload[5]) + 1;
+          const value = (payload[6] << 8) + payload[7];
+          
+          this.joins.in.a[join] = value;
+          
+          return {
+            type: 'analog',
+            join: join,
+            value: value
+          };
+        }
+        break;
+        
+      case 0x03:
+        // Запрос обновления
+        if (payload.length >= 5) {
+          const updateType = payload[4];
+          
+          if (updateType === 0x1C) {
+            // Конец запроса - отправляем подтверждения
+            const ack1 = Buffer.from([0x05, 0x00, 0x05, 0x00, 0x00, 0x02, 0x03, 0x1D]);
+            this.connected = true;
+            
+            // Отправляем подтверждение напрямую через транспорт
+            if (this.transport && this.transport.send) {
+              this.transport.send(ack1);
+            }
+            
+            if (this.debug) {
+              console.log('Отправлено подтверждение окончания запроса обновления');
+            }
+            
+            return {
+              type: 'update_complete',
+              timestamp: Date.now()
+            };
+          }
+        }
+        break;
+    }
+    
+    return {};
+  }
+  
+  // Обработка строкового пакета
+  processSerialPacket(payload) {
+    if (payload.length >= 8) {
+      const join = ((payload[5] << 8) | payload[6]) + 1;
+      const value = payload.slice(8).toString('ascii');
+      
+      this.joins.in.s[join] = value;
+      
+      return {
+        type: 'serial',
+        join: join,
+        value: value
+      };
+    }
+    
+    return {};
+  }
+  
+  // Обработка результата регистрации
+  processRegistrationResult(payload) {
+    const ipidHex = this.ipid.toString(16).padStart(2, '0');
+    
+    if (payload.length === 3 && payload.equals(Buffer.from([0xFF, 0xFF, 0x02]))) {
+      return { 
+        type: 'error', 
+        message: `IPID 0x${ipidHex} не существует` 
+      };
+    }
+    
+    if (payload.length === 4 && payload.equals(Buffer.from([0x00, 0x00, 0x00, 0x1F]))) {
+      this.registered = true;
+      this.connected = true;
+      
+      if (this.debug) {
+        console.log(`IPID 0x${ipidHex} успешно зарегистрирован`);
+      }
+      
+      // Запрашиваем обновление после регистрации
+      const updateRequest = Buffer.from([0x05, 0x00, 0x05, 0x00, 0x00, 0x02, 0x03, 0x00]);
+      
+      // Отправляем update request напрямую через транспорт
+      if (this.transport && this.transport.send) {
+        this.transport.send(updateRequest);
+      }
+      
+      return {
+        type: 'registration',
+        success: true,
+        ipid: ipidHex
+      };
+    }
+    
+    return { 
+      type: 'error', 
+      message: `Ошибка регистрации IPID 0x${ipidHex}` 
+    };
+  }
+}
+
+module.exports = CrestronCIPDriver; 
