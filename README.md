@@ -473,7 +473,7 @@ module.exports = MyDeviceDriver;
 ### Использование драйвера 
 
 1. После создания драйвера, нажмите кнопку сохранить
-2. Добавьте узел "Device command" в рабочую область
+2. Добавьте узел "Device Сщььфтв" в рабочую область
 3. В настройках узла выберите драйвер из списка
 4. Настройте параметры подключения (тип транспорта, адрес, порт)
 6. В настройках узла "Device Command" выберите команду для выполнения
@@ -481,6 +481,434 @@ module.exports = MyDeviceDriver;
 8. Запустите поток и проверьте работу драйвера
 
 ## Расширенные возможности
+
+### Работа с HTTP транспортом
+
+HTTP транспорт в Dynamic Driver предоставляет широкие возможности для взаимодействия с веб-API и HTTP-сервисами. В отличие от других транспортов (TCP, SSH), HTTP работает в режиме запрос-ответ без постоянного соединения.
+
+#### Настройка HTTP подключения
+
+При создании узла **Device Connection**, выберите тип транспорта **HTTP** и настройте следующие параметры:
+
+```javascript
+// Основные настройки
+{
+  "server": "https://api.example.com",  // Базовый URL сервера
+  "method": "GET",                      // HTTP метод по умолчанию
+  "requestTimeout": 30000,               // Таймаут запроса в мс
+  "followRedirects": true,               // Следовать переадресациям
+  "rejectUnauthorized": false            // Проверка SSL сертификатов
+}
+```
+
+#### Аутентификация HTTP
+
+Поддерживаются три типа аутентификации:
+
+1. **Basic Authentication**:
+   ```javascript
+   {
+     "authType": "basic",
+     "user": "username",
+     "password": "password"
+   }
+   ```
+
+2. **Digest Authentication**:
+   ```javascript
+   {
+     "authType": "digest",
+     "user": "username",
+     "password": "password"
+   }
+   ```
+
+3. **Bearer Token**:
+   ```javascript
+   {
+     "authType": "bearer",
+     "password": "your-jwt-token"
+   }
+   ```
+
+#### Создание HTTP драйвера
+
+Для HTTP драйверов команды должны возвращать объект с HTTP-специфичными полями:
+
+```javascript
+class MyApiDriver extends BaseDriver {
+  static commands = {
+    getData: {
+      description: 'Получить данные с API',
+      parameters: [
+        {
+          name: 'id',
+          type: 'string',
+          description: 'Идентификатор ресурса',
+          required: true
+        },
+        {
+          name: 'format',
+          type: 'string',
+          description: 'Формат данных',
+          enum: ['json', 'xml'],
+          required: false
+        }
+      ]
+    },
+    createItem: {
+      description: 'Создать новый элемент',
+      parameters: [
+        {
+          name: 'data',
+          type: 'object',
+          description: 'Данные для создания',
+          required: true
+        }
+      ]
+    }
+  };
+
+  // GET запрос
+  getData(params) {
+    const { id, format = 'json' } = params;
+    return {
+      method: 'GET',
+      path: `/api/items/${id}`,           // Путь добавляется к server
+      headers: {
+        'Accept': `application/${format}`,
+        'User-Agent': 'MyDriver/1.0'
+      }
+    };
+  }
+
+  // POST запрос
+  createItem(params) {
+    const { data } = params;
+    return {
+      method: 'POST',
+      path: '/api/items',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      payload: data
+    };
+  }
+
+  // Полный URL (игнорирует server из настроек)
+  getExternalData() {
+    return {
+      method: 'GET',
+      url: 'https://external-api.com/data',  // Полный URL
+      headers: {
+        'Accept': 'application/json'
+      }
+    };
+  }
+}
+```
+
+#### Поля HTTP команды
+
+| Поле | Описание | Пример |
+|------|----------|--------|
+| `method` | HTTP метод | `'GET'`, `'POST'`, `'PUT'`, `'DELETE'` |
+| `path` | Путь к ресурсу (добавляется к базовому URL) | `'/api/users/123'` |
+| `url` | Полный URL (игнорирует базовый URL) | `'https://api.example.com/data'` |
+| `headers` | Заголовки запроса | `{ 'Content-Type': 'application/json' }` |
+| `payload` | Тело запроса | `{ name: 'John', age: 30 }` |
+| `cookies` | Куки для запроса | `{ sessionId: 'abc123' }` |
+
+#### Обработка HTTP ответов
+
+HTTP ответы содержат дополнительные поля:
+
+```javascript
+parseResponse(data) {
+  // data содержит:
+  // - data.payload: тело ответа (Buffer или string)
+  // - data.statusCode: HTTP статус код
+  // - data.headers: заголовки ответа
+  // - data.responseUrl: итоговый URL после переадресаций
+  // - data.responseCookies: куки от сервера
+
+  if (data.statusCode >= 400) {
+    return {
+      type: 'error',
+      statusCode: data.statusCode,
+      message: `HTTP Error: ${data.statusCode}`
+    };
+  }
+
+  try {
+    const body = JSON.parse(data.payload);
+    return {
+      type: 'success',
+      statusCode: data.statusCode,
+      data: body,
+      headers: data.headers
+    };
+  } catch (error) {
+    return {
+      type: 'parseError',
+      message: 'Не удалось распарсить JSON ответ',
+      raw: data.payload.toString()
+    };
+  }
+}
+```
+
+#### Работа с query параметрами
+
+```javascript
+// Способ 1: добавление в path
+getUsers(params) {
+  const { page = 1, limit = 10 } = params;
+  return {
+    method: 'GET',
+    path: `/api/users?page=${page}&limit=${limit}`
+  };
+}
+
+// Способ 2: использование URLSearchParams
+getUsers(params) {
+  const { page = 1, limit = 10, filter } = params;
+  const searchParams = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString()
+  });
+  
+  if (filter) {
+    searchParams.append('filter', filter);
+  }
+  
+  return {
+    method: 'GET',
+    path: `/api/users?${searchParams.toString()}`
+  };
+}
+```
+
+#### Загрузка файлов (multipart/form-data)
+
+```javascript
+uploadFile(params) {
+  const { file, description } = params;
+  
+  return {
+    method: 'POST',
+    path: '/api/upload',
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    payload: {
+      file: {
+        value: file,  // Buffer с содержимым файла
+        options: { 
+          filename: 'document.pdf',
+          contentType: 'application/pdf'
+        }
+      },
+      description: description
+    }
+  };
+}
+```
+
+#### Работа с куками
+
+```javascript
+// Установка кук в запросе
+loginUser(params) {
+  const { username, password } = params;
+  return {
+    method: 'POST',
+    path: '/api/login',
+    payload: { username, password },
+    cookies: {
+      sessionId: 'existing-session'
+    }
+  };
+}
+
+// Обработка кук в ответе
+parseResponse(data) {
+  if (data.responseCookies) {
+    // Сохраняем куки для последующих запросов
+    this.state.cookies = data.responseCookies;
+  }
+  
+  return {
+    type: 'loginResponse',
+    success: data.statusCode === 200,
+    cookies: data.responseCookies
+  };
+}
+```
+
+#### Контекстные переменные
+
+HTTP транспорт поддерживает использование контекстных переменных Node-RED:
+
+```javascript
+// В настройках узла Device Connection:
+{
+  "server": "{{global.apiServer}}",        // Из global контекста
+  "user": "{{flow.apiUser}}",             // Из flow контекста  
+  "password": "{{env.API_TOKEN}}"         // Из переменных окружения
+}
+```
+
+#### Пример полного HTTP драйвера
+
+```javascript
+const BaseDriver = require('base-driver');
+const { URLSearchParams } = require('url');
+
+class RestApiDriver extends BaseDriver {
+  static metadata = {
+    name: 'REST API',
+    manufacturer: 'Generic',
+    version: '1.0.0',
+    description: 'Универсальный драйвер для REST API'
+  };
+
+  static commands = {
+    getUsers: {
+      description: 'Получить список пользователей',
+      parameters: [
+        { name: 'page', type: 'number', description: 'Номер страницы', required: false },
+        { name: 'limit', type: 'number', description: 'Количество на странице', required: false }
+      ]
+    },
+    createUser: {
+      description: 'Создать пользователя',
+      parameters: [
+        { name: 'userData', type: 'object', description: 'Данные пользователя', required: true }
+      ]
+    },
+    updateUser: {
+      description: 'Обновить пользователя',
+      parameters: [
+        { name: 'id', type: 'string', description: 'ID пользователя', required: true },
+        { name: 'userData', type: 'object', description: 'Новые данные', required: true }
+      ]
+    },
+    deleteUser: {
+      description: 'Удалить пользователя',
+      parameters: [
+        { name: 'id', type: 'string', description: 'ID пользователя', required: true }
+      ]
+    }
+  };
+
+  getUsers(params) {
+    const { page = 1, limit = 10 } = params;
+    const query = new URLSearchParams({ page, limit }).toString();
+    
+    return {
+      method: 'GET',
+      path: `/api/users?${query}`,
+      headers: {
+        'Accept': 'application/json'
+      }
+    };
+  }
+
+  createUser(params) {
+    const { userData } = params;
+    
+    return {
+      method: 'POST',
+      path: '/api/users',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      payload: userData
+    };
+  }
+
+  updateUser(params) {
+    const { id, userData } = params;
+    
+    return {
+      method: 'PUT',
+      path: `/api/users/${id}`,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      payload: userData
+    };
+  }
+
+  deleteUser(params) {
+    const { id } = params;
+    
+    return {
+      method: 'DELETE',
+      path: `/api/users/${id}`,
+      headers: {
+        'Accept': 'application/json'
+      }
+    };
+  }
+
+  parseResponse(data) {
+    // Обработка ошибок HTTP
+    if (data.statusCode >= 400) {
+      return {
+        type: 'error',
+        statusCode: data.statusCode,
+        message: `HTTP ${data.statusCode}: ${data.payload || 'Unknown error'}`,
+        headers: data.headers
+      };
+    }
+
+    // Успешный ответ
+    try {
+      let responseData = data.payload;
+      
+      // Парсим JSON если это строка
+      if (typeof responseData === 'string') {
+        responseData = JSON.parse(responseData);
+      }
+
+      return {
+        type: 'success',
+        statusCode: data.statusCode,
+        data: responseData,
+        headers: data.headers,
+        url: data.responseUrl
+      };
+    } catch (error) {
+      return {
+        type: 'parseError',
+        message: 'Ошибка парсинга JSON ответа',
+        statusCode: data.statusCode,
+        raw: data.payload.toString(),
+        error: error.message
+      };
+    }
+  }
+
+  initialize() {
+    // Можно выполнить начальный запрос для проверки доступности API
+    this.publishCommand('getUsers', { limit: 1 });
+  }
+}
+
+module.exports = RestApiDriver;
+```
+
+#### Тестирование HTTP драйвера
+
+1. Создайте узел **Device Connection** с типом транспорта **HTTP**
+2. Укажите базовый URL в поле **Server**: `https://jsonplaceholder.typicode.com`
+3. Создайте узел **Device Command** и выберите команду `getUsers`
+4. Добавьте узел **Device Response Listener** для получения ответов
+5. Запустите поток и проверьте получение данных
 
 ### Обработка сложных протоколов
 
