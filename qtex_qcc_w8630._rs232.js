@@ -2,21 +2,21 @@ const BaseDriver = require('base-driver');
 
 /**
  * Драйвер для конференц-системы на основе протокола связи
- * Версия 3.0 - Полностью исправленная версия с использованием Buffer
+ * Версия 3.2 - Объединены команды управления микрофонами и унифицированы события состояния
  */
 class ConferenceSystemDriver extends BaseDriver {
   // Метаданные драйвера
   static metadata = {
     name: 'ConferenceSystem',
     manufacturer: 'Generic',
-    version: '3.0.0',
+    version: '3.2.0',
     description: 'Драйвер для управления конференц-системой через последовательный порт (бинарный режим)'
   };
   
   // Определение команд
   static commands = {
-    micOn: {
-      description: 'Включить микрофон участника',
+    setMicrophoneState: {
+      description: 'Установить состояние микрофона участника',
       parameters: [
         {
           name: 'unitId',
@@ -33,27 +33,12 @@ class ConferenceSystemDriver extends BaseDriver {
           required: false,
           enum: ['delegate', 'chairman'],
           default: 'delegate'
-        }
-      ]
-    },
-    micOff: {
-      description: 'Выключить микрофон участника',
-      parameters: [
-        {
-          name: 'unitId',
-          type: 'number',
-          description: 'Номер микрофона (1-999)',
-          required: true,
-          min: 1,
-          max: 999
         },
         {
-          name: 'unitType',
-          type: 'string',
-          description: 'Тип микрофона',
-          required: false,
-          enum: ['delegate', 'chairman'],
-          default: 'delegate'
+          name: 'state',
+          type: 'boolean',
+          description: 'Состояние микрофона: true - включен, false - выключен',
+          required: true
         }
       ]
     },
@@ -144,90 +129,113 @@ class ConferenceSystemDriver extends BaseDriver {
     }
   };
   
-  // Обработчики для отдельных кадров
-  static frameHandlers = {
-    micControl: {
+  // JSON-описание обработчиков ответов
+  static responses = {
+    chairmanPriorityResponse: {
+      description: 'Активирован приоритет председателя',
       matcher: {
-        length: 5,
         pattern: [0xFE, 0x11, null, null, 0xFC]
       },
       extract: function(data) {
         const param1 = data[2];
         const param2 = data[3];
         
-        // Извлекаем старшие 4 бита и тип действия
         const highBits = (param1 & 0xF0) >> 4;
         const actionType = param1 & 0x0F;
         
-        // Собираем полный адрес устройства
-        const unitId = (highBits << 8) | param2;
-        
-        let unitType = 'delegate';
-        let action = 'unknown';
-        
-        // Согласно документации:
-        // 00 - Delegate unit Mic On
-        // 01 - Delegate unit Mic Off
-        // 07 - Chairman unit Mic On
-        // 08 - Chairman unit Mic Off
-        // 0B - Chairman unit Priority
-        switch(actionType) {
-          case 0x00: 
-            action = 'micOn';
-            break;
-          case 0x01: 
-            action = 'micOff';
-            break;
-          case 0x07: 
-            unitType = 'chairman';
-            action = 'micOn';
-            break;
-          case 0x08: 
-            unitType = 'chairman';
-            action = 'micOff';
-            break;
-          case 0x0B: 
-            unitType = 'chairman';
-            action = 'priority';
-            break;
+        // Пропускаем другие типы событий
+        if (actionType !== 0x0B) {
+          return null;
         }
         
+        const unitId = (highBits << 8) | param2;
+        
         return {
-          type: action,
+          type: 'chairmanPriority',
+          unitId: unitId,
+          rawCommand: data.toString('hex').toUpperCase()
+        };
+      }
+    },
+    microphoneState: {
+      description: 'Состояние микрофона участника',
+      matcher: {
+        pattern: [0xFE, 0x11, null, null, 0xFC]
+      },
+      extract: function(data) {
+        const param1 = data[2];
+        const param2 = data[3];
+        
+        const highBits = (param1 & 0xF0) >> 4;
+        const actionType = param1 & 0x0F;
+        
+        // Пропускаем chairmanPriority
+        if (actionType === 0x0B) {
+          return null;
+        }
+        
+        let state, unitType;
+        switch(actionType) {
+          case 0x00: // Delegate unit Mic On
+            state = true;
+            unitType = 'delegate';
+            break;
+          case 0x01: // Delegate unit Mic Off
+            state = false;
+            unitType = 'delegate';
+            break;
+          case 0x07: // Chairman unit Mic On
+            state = true;
+            unitType = 'chairman';
+            break;
+          case 0x08: // Chairman unit Mic Off
+            state = false;
+            unitType = 'chairman';
+            break;
+          default:
+            return null;
+        }
+        
+        const unitId = (highBits << 8) | param2;
+        
+        return {
+          type: 'microphoneState',
           unitId: unitId,
           unitType: unitType,
-          actionType: actionType,
-          raw: data
+          state: state, // Булево значение состояния
+          rawCommand: data.toString('hex').toUpperCase()
         };
       }
     },
-    registrationStart: {
+    registrationStarted: {
+      description: 'Регистрация участников начата',
       matcher: {
-        length: 5,
         pattern: [0xFE, 0x03, 0x32, 0xDE, 0xFC]
       },
-      extract: function() {
+      extract: function(data) {
         return {
           type: 'registrationStarted',
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          rawCommand: data.toString('hex').toUpperCase()
         };
       }
     },
-    registrationEnd: {
+    registrationEnded: {
+      description: 'Регистрация участников завершена',
       matcher: {
-        length: 5,
         pattern: [0xFE, 0x03, 0x01, 0x00, 0xFC]
       },
-      extract: function() {
+      extract: function(data) {
         return {
           type: 'registrationEnded',
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          rawCommand: data.toString('hex').toUpperCase()
         };
       }
     },
     cameraTracking: {
+      description: 'Команда для отслеживания камеры',
       matcher: {
-        length: 5,
         pattern: [0xFE, 0xC7, null, null, 0xFC]
       },
       extract: function(data) {
@@ -239,13 +247,13 @@ class ConferenceSystemDriver extends BaseDriver {
           type: 'cameraTracking',
           preset: preset,
           timestamp: new Date().toISOString(),
-          raw: data
+          rawCommand: data.toString('hex').toUpperCase()
         };
       }
     },
     statusResponse: {
+      description: 'Ответ со статусом системы',
       matcher: {
-        length: 5,
         pattern: [0xFE, 0xCA, null, null, 0xFC]
       },
       extract: function(data) {
@@ -266,7 +274,20 @@ class ConferenceSystemDriver extends BaseDriver {
           mode: modeName,
           speakersCount: speakersCount,
           timestamp: new Date().toISOString(),
-          raw: data
+          rawCommand: data.toString('hex').toUpperCase()
+        };
+      }
+    },
+    error: {
+      description: 'Ошибка системы',
+      matcher: {
+        pattern: /Error/i
+      },
+      extract: function(match) {
+        return {
+          type: 'error',
+          message: 'Системная ошибка',
+          raw: match[0]
         };
       }
     }
@@ -282,37 +303,33 @@ class ConferenceSystemDriver extends BaseDriver {
   
   // Вспомогательная функция для преобразования номера микрофона в высокие и низкие биты
   _getUnitAddress(unitId) {
-    // Проверяем диапазон номера
     if (unitId < 1 || unitId > 999) {
       throw new Error(`Недопустимый номер микрофона: ${unitId}. Допустимый диапазон: 1-999`);
     }
     
-    // Преобразуем десятичный номер в шестнадцатеричный
     const hexId = unitId.toString(16).padStart(3, '0');
-    // Старшие 4 бита (первый символ)
     const highBits = parseInt(hexId[0], 16);
-    // Младшие 8 бит (последние два символа)
     const lowBits = parseInt(hexId.substring(1), 16);
     
     return { highBits, lowBits };
   }
   
-  // Методы команд (теперь используем Buffer)
-  micOn(params) {
-    const { unitId, unitType = 'delegate' } = params;
+  // Унифицированная команда управления состоянием микрофона
+  setMicrophoneState(params) {
+    const { unitId, unitType = 'delegate', state } = params;
     
     // Получаем адрес устройства
     const { highBits, lowBits } = this._getUnitAddress(unitId);
     
-    // Определяем тип микрофона для параметра 1
-    let param1;
-    if (unitType === 'chairman') {
-      // Согласно документации: Chairman unit Mic On - 07
-      param1 = (highBits << 4) | 0x07;
+    // Определяем код операции в зависимости от состояния и типа
+    let actionByte;
+    if (state) {
+      actionByte = unitType === 'chairman' ? 0x07 : 0x00; // Chairman/Delegate On
     } else {
-      // Согласно документации: Delegate unit Mic On - 00
-      param1 = (highBits << 4) | 0x00;
+      actionByte = unitType === 'chairman' ? 0x08 : 0x01; // Chairman/Delegate Off
     }
+    
+    const param1 = (highBits << 4) | actionByte;
     
     // Создаем буфер с бинарными данными
     const buffer = Buffer.from([
@@ -324,39 +341,7 @@ class ConferenceSystemDriver extends BaseDriver {
     ]);
     
     if (this.debug) {
-      console.log(`[driver] Включение микрофона: unitId=${unitId}, unitType=${unitType}, команда=${buffer.toString('hex').toUpperCase()}`);
-    }
-    
-    return { payload: buffer };
-  }
-  
-  micOff(params) {
-    const { unitId, unitType = 'delegate' } = params;
-    
-    // Получаем адрес устройства
-    const { highBits, lowBits } = this._getUnitAddress(unitId);
-    
-    // Определяем тип микрофона для параметра 1
-    let param1;
-    if (unitType === 'chairman') {
-      // Согласно документации: Chairman unit Mic Off - 08
-      param1 = (highBits << 4) | 0x08;
-    } else {
-      // Согласно документации: Delegate unit Mic Off - 01
-      param1 = (highBits << 4) | 0x01;
-    }
-    
-    // Создаем буфер с бинарными данными
-    const buffer = Buffer.from([
-      0xFE, // Заголовок кадра
-      0x11, // Тип сообщения
-      param1, // Параметр 1
-      lowBits, // Параметр 2
-      0xFC // Конец кадра
-    ]);
-    
-    if (this.debug) {
-      console.log(`[driver] Выключение микрофона: unitId=${unitId}, unitType=${unitType}, команда=${buffer.toString('hex').toUpperCase()}`);
+      console.log(`[driver] Изменение состояния микрофона: unitId=${unitId}, unitType=${unitType}, state=${state}, команда=${buffer.toString('hex').toUpperCase()}`);
     }
     
     return { payload: buffer };
@@ -368,10 +353,9 @@ class ConferenceSystemDriver extends BaseDriver {
     // Получаем адрес устройства
     const { highBits, lowBits } = this._getUnitAddress(unitId);
     
-    // Для функции приоритета председателя используем 0B (согласно документации)
+    // Код операции для приоритета председателя
     const param1 = (highBits << 4) | 0x0B;
     
-    // Создаем буфер с бинарными данными
     const buffer = Buffer.from([
       0xFE, // Заголовок кадра
       0x11, // Тип сообщения
@@ -388,7 +372,6 @@ class ConferenceSystemDriver extends BaseDriver {
   }
   
   startRegistration() {
-    // Создаем буфер с бинарными данными
     const buffer = Buffer.from([0xFE, 0x03, 0x32, 0xDE, 0xFC]);
     
     if (this.debug) {
@@ -399,7 +382,6 @@ class ConferenceSystemDriver extends BaseDriver {
   }
   
   endRegistration() {
-    // Создаем буфер с бинарными данными
     const buffer = Buffer.from([0xFE, 0x03, 0x01, 0x00, 0xFC]);
     
     if (this.debug) {
@@ -412,7 +394,6 @@ class ConferenceSystemDriver extends BaseDriver {
   setMeetingMode(params) {
     const { mode, speakersCount } = params;
     
-    // Преобразуем режим в числовое значение
     let modeValue;
     switch(mode) {
       case 'FIFO': modeValue = 0x00; break;
@@ -423,12 +404,10 @@ class ConferenceSystemDriver extends BaseDriver {
       default: modeValue = 0x00;
     }
     
-    // Проверяем количество спикеров
     if (speakersCount < 1 || speakersCount > 8) {
       throw new Error(`Недопустимое количество спикеров: ${speakersCount}. Допустимый диапазон: 1-8`);
     }
     
-    // Создаем буфер с бинарными данными
     const buffer = Buffer.from([
       0xFE, // Заголовок кадра
       0xC1, // Тип сообщения
@@ -447,15 +426,12 @@ class ConferenceSystemDriver extends BaseDriver {
   setVolume(params) {
     const { type, level } = params;
     
-    // Проверяем уровень громкости
     if (level < 0 || level > 20) {
       throw new Error(`Недопустимый уровень громкости: ${level}. Допустимый диапазон: 0-20`);
     }
     
-    // Определяем тип громкости
     const param1 = type === 'input' ? 0x01 : 0x02;
     
-    // Создаем буфер с бинарными данными
     const buffer = Buffer.from([
       0xFE, // Заголовок кадра
       0xC2, // Тип сообщения
@@ -474,16 +450,13 @@ class ConferenceSystemDriver extends BaseDriver {
   recallCameraPosition(params) {
     const { preset } = params;
     
-    // Проверяем диапазон предустановки
     if (preset < 0 || preset > 225) {
       throw new Error(`Недопустимый номер предустановки: ${preset}. Допустимый диапазон: 0-225`);
     }
     
-    // Вычисляем высокий и низкий байты
     const presetHigh = Math.floor(preset / 256);
     const presetLow = preset % 256;
     
-    // Создаем буфер с бинарными данными
     const buffer = Buffer.from([
       0xFE, // Заголовок кадра
       0xC7, // Тип сообщения
@@ -500,7 +473,6 @@ class ConferenceSystemDriver extends BaseDriver {
   }
   
   recallPanorama() {
-    // Создаем буфер с бинарными данными для общей панорамной позиции
     const buffer = Buffer.from([0xFE, 0xC7, 0x00, 0x00, 0xFC]);
     
     if (this.debug) {
@@ -511,7 +483,6 @@ class ConferenceSystemDriver extends BaseDriver {
   }
   
   requestStatus() {
-    // Команда для запроса статуса системы
     const buffer = Buffer.from([0xFE, 0xCA, 0x00, 0x00, 0xFC]);
     
     if (this.debug) {
@@ -522,7 +493,7 @@ class ConferenceSystemDriver extends BaseDriver {
   }
   
   // Основной метод обработки ответов
-  parseResponse(data) {
+   parseResponse(data) {
     let responseBuffer = data;
     
     // Если получаем объект с полем data, используем его
@@ -665,30 +636,46 @@ class ConferenceSystemDriver extends BaseDriver {
       return null;
     }
     
-    // Проверяем известные шаблоны
-    for (const [key, handler] of Object.entries(ConferenceSystemDriver.frameHandlers)) {
+    // Проверяем известные шаблоны из static.responses
+    for (const [key, handler] of Object.entries(ConferenceSystemDriver.responses)) {
       if (handler.matcher) {
-        // Проверяем длину
-        if (handler.matcher.length && frameBuffer.length !== handler.matcher.length) {
-          continue;
-        }
-        
         // Проверяем паттерн
         let match = true;
-        for (let i = 0; i < handler.matcher.pattern.length; i++) {
-          const patternValue = handler.matcher.pattern[i];
-          // Если null в паттерне, это означает "любое значение"
-          if (patternValue !== null && frameBuffer[i] !== patternValue) {
-            match = false;
-            break;
+        
+        if (Array.isArray(handler.matcher.pattern)) {
+          // Бинарный паттерн
+          for (let i = 0; i < handler.matcher.pattern.length; i++) {
+            const patternValue = handler.matcher.pattern[i];
+            // Если null в паттерне, это означает "любое значение"
+            if (patternValue !== null && frameBuffer[i] !== patternValue) {
+              match = false;
+              break;
+            }
           }
+        } else if (handler.matcher.pattern instanceof RegExp) {
+          // Регулярное выражение (для совместимости)
+          const hexString = frameBuffer.toString('hex').toUpperCase().match(/.{1,2}/g).join(' ');
+          match = handler.matcher.pattern.test(hexString);
         }
         
         if (match && handler.extract) {
           try {
-            const result = handler.extract(frameBuffer);
-            result.commandType = key;
-            return result;
+            let extractResult;
+            
+            if (Array.isArray(handler.matcher.pattern)) {
+              // Для бинарных данных передаем буфер
+              extractResult = handler.extract(frameBuffer);
+            } else {
+              // Для регулярных выражений передаем строку
+              const hexString = frameBuffer.toString('hex').toUpperCase().match(/.{1,2}/g).join(' ');
+              const matchResult = hexString.match(handler.matcher.pattern);
+              extractResult = handler.extract(matchResult);
+            }
+            
+            if (extractResult) {
+              extractResult.commandType = key;
+              return extractResult;
+            }
           } catch (error) {
             console.error(`[driver] Ошибка при обработке кадра ${key}:`, error);
             continue;
